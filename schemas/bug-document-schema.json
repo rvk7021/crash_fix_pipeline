@@ -1,0 +1,226 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cosmos.project/schemas/bug-document-v1.0.0.json",
+  "title": "Cosmos Bug Document Schema",
+  "description": "Standardized schema for documenting bug fixes and root cause analysis in Project Cosmos",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "document_id",
+    "ticket_id",
+    "created_at_utc",
+    "source_commit_hash",
+    "author",
+    "problem_details",
+    "analysis_and_solution",
+    "metadata_for_retrieval",
+    "text_for_embedding"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of the schema being used",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "examples": ["1.0.0"]
+    },
+    "document_id": {
+      "type": "string",
+      "description": "Unique identifier for this document (typically UUID)",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "examples": ["doc_uuid_a1b2c3d4"]
+    },
+    "ticket_id": {
+      "type": "string",
+      "description": "Ticket or issue identifier from project management system",
+      "pattern": "^[A-Z]+-\\d+$",
+      "examples": ["PAY-451", "AUTH-123"]
+    },
+    "created_at_utc": {
+      "type": "string",
+      "description": "ISO 8601 timestamp when the document was created",
+      "format": "date-time",
+      "examples": ["2025-10-29T10:00:00Z"]
+    },
+    "source_commit_hash": {
+      "type": "string",
+      "description": "Git commit hash where the fix was implemented",
+      "pattern": "^[a-f0-9]{40}$",
+      "examples": ["a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"]
+    },
+    "author": {
+      "type": "string",
+      "description": "Email address of the developer who created this document",
+      "format": "email",
+      "examples": ["developer@yourcompany.com"]
+    },
+    "problem_details": {
+      "type": "object",
+      "description": "Detailed description of the problem/bug",
+      "required": [
+        "problem_summary",
+        "detail_problem",
+        "error_message",
+        "source_file",
+        "function_name",
+        "line_range"
+      ],
+      "properties": {
+        "problem_summary": {
+          "type": "string",
+          "description": "Brief one-line summary of the problem",
+          "minLength": 10,
+          "maxLength": 200
+        },
+        "detail_problem": {
+          "type": "string",
+          "description": "Detailed description of the problem, context, and impact",
+          "minLength": 50
+        },
+        "error_message": {
+          "type": "string",
+          "description": "Exact error message or exception type",
+          "minLength": 5
+        },
+        "source_file": {
+          "type": "string",
+          "description": "Path to the source file where the bug occurred",
+          "pattern": "^[a-zA-Z0-9_/.-]+$",
+          "examples": ["src/payments/handler.js"]
+        },
+        "function_name": {
+          "type": "string",
+          "description": "Name of the function or method where the bug occurred",
+          "minLength": 1,
+          "examples": ["handlePayment"]
+        },
+        "line_range": {
+          "type": "string",
+          "description": "Line number or range where the bug occurred",
+          "pattern": "^\\d+(-\\d+)?$",
+          "examples": ["182", "180-230"]
+        },
+        "full_stack_trace": {
+          "type": "string",
+          "description": "Complete stack trace if available (optional)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "analysis_and_solution": {
+      "type": "object",
+      "description": "Root cause analysis and solution details",
+      "required": [
+        "summary",
+        "root_cause_pattern",
+        "detailed_solution_narrative",
+        "code_diff"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Brief summary of the root cause and solution",
+          "minLength": 20,
+          "maxLength": 300
+        },
+        "root_cause_pattern": {
+          "type": "string",
+          "description": "Categorized pattern of the root cause (e.g., 'Missing Guard Clause', 'Null Pointer', 'Race Condition')",
+          "minLength": 5,
+          "examples": ["Missing Guard Clause / Null Check", "Race Condition", "Type Error"]
+        },
+        "detailed_solution_narrative": {
+          "type": "string",
+          "description": "Comprehensive narrative explaining the root cause, why it happened, and how the solution addresses it",
+          "minLength": 100
+        },
+        "code_diff": {
+          "type": "string",
+          "description": "Unified diff format showing the code changes (fix)",
+          "minLength": 20,
+          "examples": ["--- a/src/payments/handler.js\n+++ b/src/payments/handler.js\n@@ -181,1 +181,2 @@\n+  if (!req.user) { return res.status(401).send('Unauthorized'); }\n   const userId = req.user.id;"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadata_for_retrieval": {
+      "type": "object",
+      "description": "Metadata used for retrieval and tagging in the VectorDB",
+      "required": [
+        "repo",
+        "language",
+        "tags",
+        "embedding_type"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "description": "Repository name where the bug occurred",
+          "minLength": 1,
+          "examples": ["payments-service", "auth-service"]
+        },
+        "branch": {
+          "type": "string",
+          "description": "Git branch name (optional)",
+          "examples": ["main", "develop"]
+        },
+        "language": {
+          "type": "string",
+          "description": "Programming language of the source file",
+          "enum": ["javascript", "typescript", "python", "java", "go", "rust", "cpp", "csharp", "ruby", "php", "other"],
+          "examples": ["javascript", "python"]
+        },
+        "tags": {
+          "type": "array",
+          "description": "Tags for semantic search and categorization",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "examples": [["TypeError", "auth", "guard-clause", "payments-service", "req.user"]]
+        },
+        "state": {
+          "type": "string",
+          "description": "State of the fix/ticket",
+          "enum": ["open", "in-progress", "resolved", "accepted", "rejected", "deferred"],
+          "default": "accepted",
+          "examples": ["accepted", "resolved"]
+        },
+        "severity": {
+          "type": "string",
+          "description": "Severity level of the bug",
+          "enum": ["critical", "high", "medium", "low", "info"],
+          "examples": ["critical", "high"]
+        },
+        "impact_scope": {
+          "type": "string",
+          "description": "Scope of impact (e.g., 'api-gateway', 'database', 'frontend')",
+          "examples": ["api-gateway", "payment-processing", "authentication"]
+        },
+        "related_tickets": {
+          "type": "array",
+          "description": "Related ticket IDs",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]+-\\d+$"
+          },
+          "examples": [["PAY-301", "AUTH-112"]]
+        },
+        "embedding_type": {
+          "type": "string",
+          "description": "Type identifier for embedding generation",
+          "pattern": "^[a-z0-9_]+$",
+          "examples": ["cosmos_v1_bugdoc"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "text_for_embedding": {
+      "type": "string",
+      "description": "Concatenated text used for generating vector embeddings. Should include all searchable/relevant text from the document.",
+      "minLength": 100
+    }
+  },
+  "additionalProperties": false
+}
+
