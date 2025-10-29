@@ -33,7 +33,7 @@ Describes the bug/problem that was encountered and fixed.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `problem_summary` | string | ✅ | One-line summary (10-200 chars) |
+了上去| `problem_summary` | string | ✅ | One-line summary (10-300 chars) |
 | `detail_problem` | string | ✅ | Detailed problem description (50+ chars) |
 | `error_message` | string | ✅ | Exact error/exception message (5+ chars) |
 | `source_file` | string | ✅ | Path to source file |
@@ -62,7 +62,7 @@ Contains root cause analysis and the implemented solution.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `summary` | string | ✅ | Brief summary of RCA and solution (20-300 chars) |
+| `summary` | string | ✅ | Brief summary of RCA and solution (20-500 chars) |
 | `root_cause_pattern` | string | ✅ | Categorized pattern (e.g., "Missing Guard Clause / Null Check") |
 | `detailed_solution_narrative` | string | ✅ | Comprehensive narrative (100+ chars) |
 | `code_diff` | string | ✅ | Unified diff format showing the fix |

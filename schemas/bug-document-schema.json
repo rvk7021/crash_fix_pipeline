@@ -120,7 +120,7 @@
           "type": "string",
           "description": "Brief summary of the root cause and solution",
           "minLength": 20,
-          "maxLength": 300
+          "maxLength": 500
         },
         "root_cause_pattern": {
           "type": "string",
