@@ -20,6 +20,7 @@ This document describes the standardized JSON schema used for documenting bug fi
 | `created_at_utc` | string (ISO 8601) | ✅ | Creation timestamp |
 | `source_commit_hash` | string | ✅ | Git commit hash (40 chars) |
 | `author` | string (email) | ✅ | Developer email |
+| `author_name` | string | ❌ | Developer name (optional) |
 | `problem_details` | object | ✅ | Problem description |
 | `analysis_and_solution` | object | ✅ | RCA and fix details |
 | `metadata_for_retrieval` | object | ✅ | Search/tagging metadata |

@@ -253,3 +253,14 @@ mlruns/
 workspace.json
 .settings.json
 
+# Tools data output - All extracted PR data, bug documents, and indexed codebases (contains sensitive company/internal data)
+# Includes: indexed_code_*.json, repos_access.json, extracted_data_*.json, bug_doc_*.json
+tools/data/*.json
+tools/data/*.JSON
+!tools/data/.gitkeep
+
+# Tools environment and config
+tools/.env
+tools/.env.local
+tools/.env.*
+

@@ -53,6 +53,11 @@
       "format": "email",
       "examples": ["developer@yourcompany.com"]
     },
+    "author_name": {
+      "type": "string",
+      "description": "Name of the developer who created this document",
+      "examples": ["Developer Name", "John Doe"]
+    },
     "problem_details": {
       "type": "object",
       "description": "Detailed description of the problem/bug",
