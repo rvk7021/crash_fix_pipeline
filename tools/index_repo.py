@@ -750,39 +750,26 @@ def build_code_graph(files: List[Dict], repo_path: Path) -> Dict:
     }
 
 
-def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None, 
-                  include_body: bool = True, include_docstrings: bool = True) -> Dict:
+def parse_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None,
+                  include_body: bool = True, include_docstrings: bool = True) -> tuple:
     """
-    Index the codebase structure. Performs deep parsing for Python files.
+    Pass 1: Parse codebase and extract all symbols from files.
+    Returns files list (with symbols) and directories list for building indexes.
     
     Args:
         repo_path: Path to cloned repository
         ignore_patterns: Additional patterns to ignore
-        include_body: Whether to include function body text (default: True, increases size)
-        include_docstrings: Whether to include docstrings (default: True)
+        include_body: Whether to include function body text
+        include_docstrings: Whether to include docstrings
+    
+    Returns:
+        Tuple of (files_list, directories_list, statistics_dict)
     """
     if ignore_patterns is None:
         ignore_patterns = []
     
-    indexed_structure = {
-        "files": [],
-        "directories": [],
-        "statistics": {
-            "total_files": 0,
-            "total_directories": 0,
-            "total_size_bytes": 0,
-            "languages": {},
-            "by_extension": {},
-            "total_python_symbols": 0,
-        },
-        "tree": {},
-        "graph": {
-            "nodes": [],
-            "edges": []
-        },
-        "inverted_index": {}  # NEW: For fast symbol lookups
-    }
-    
+    files_list = []
+    directories_list = []
     languages = {}
     extensions = {}
     total_size = 0
@@ -795,12 +782,12 @@ def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None,
         TaskProgressColumn(),
         console=console
     ) as progress:
-        task = progress.add_task("[cyan]Indexing codebase...", total=None)
+        task = progress.add_task("[cyan]Parsing codebase...", total=None)
         
         file_count = 0
         dir_count = 0
         
-        # Pre-count total files for a better progress bar (optional but nice)
+        # Pre-count total files for progress bar
         total_files_estimate = sum(len(files) for _, _, files in os.walk(repo_path))
         progress.update(task, total=total_files_estimate)
 
@@ -817,7 +804,7 @@ def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None,
                     continue
                 
                 rel_path = dir_path.relative_to(repo_path)
-                indexed_structure["directories"].append({
+                directories_list.append({
                     "path": str(rel_path),
                     "name": dir_name,
                 })
@@ -829,7 +816,7 @@ def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None,
                 if should_ignore_path(file_path, ignore_patterns):
                     continue
                 
-                progress.update(task, description=f"[cyan]Indexing... {file_name}[/cyan]")
+                progress.update(task, description=f"[cyan]Parsing... {file_name}[/cyan]")
                 
                 try:
                     rel_path = file_path.relative_to(repo_path)
@@ -844,12 +831,12 @@ def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None,
                         "language": language,
                         "extension": ext if ext else "no extension",
                         "directory": str(rel_path.parent) if rel_path.parent != Path('.') else "root",
-                        "symbols": None # Placeholder for code symbols
+                        "symbols": None  # Will be populated for Python files
                     }
                     
-                    # --- Code-Aware Parsing with Docstrings and Bodies ---
+                    # Code-Aware Parsing with Docstrings and Bodies
                     if language == 'python':
-                        progress.update(task, description=f"[blue]Parsing... {file_name}[/blue]")
+                        progress.update(task, description=f"[blue]Parsing AST... {file_name}[/blue]")
                         symbols = parse_python_file(file_path, include_body=include_body, include_docstrings=include_docstrings)
                         if symbols:
                             file_info["symbols"] = symbols
@@ -860,9 +847,8 @@ def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None,
                                 len(symbols["imports"]) +
                                 len(symbols.get("variables", []))
                             )
-                    # --- End Code Parsing ---
 
-                    indexed_structure["files"].append(file_info)
+                    files_list.append(file_info)
                     
                     # Update statistics
                     languages[language] = languages.get(language, 0) + 1
@@ -873,63 +859,116 @@ def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None,
                     progress.advance(task)
                     
                 except Exception as e:
-                    console.print(f"[yellow]Warning: Could not index {file_path}: {e}[/yellow]")
+                    console.print(f"[yellow]Warning: Could not parse {file_path}: {e}[/yellow]")
         
-        # Build tree structure
-        tree = {}
-        for file_info in indexed_structure["files"]:
-            parts = file_info["path"].split(os.sep)
-            current = tree
-            for part in parts[:-1]:  # All but the file name
-                if part not in current:
-                    current[part] = {}
-                current = current[part]
-            # Add file info
-            file_name = parts[-1]
-            current[file_name] = {
-                "type": "file",
-                "size": file_info["size_bytes"],
-                "language": file_info["language"],
-                "extension": file_info["extension"],
-                "has_symbols": file_info["symbols"] is not None
-            }
+        progress.update(task, description=f"[green]✓ Parsed {file_count} files and {dir_count} directories[/green]")
         
-        for dir_info in indexed_structure["directories"]:
-            parts = dir_info["path"].split(os.sep)
-            current = tree
-            for part in parts:
-                if part not in current:
-                    current[part] = {}
-                current = current[part]
-            current["_type"] = "directory"
-        
-        indexed_structure["tree"] = tree
-        
-        # Update statistics
-        indexed_structure["statistics"]["total_files"] = file_count
-        indexed_structure["statistics"]["total_directories"] = dir_count
-        indexed_structure["statistics"]["total_size_bytes"] = total_size
-        indexed_structure["statistics"]["languages"] = dict(sorted(languages.items(), key=lambda x: x[1], reverse=True))
-        indexed_structure["statistics"]["by_extension"] = dict(sorted(extensions.items(), key=lambda x: x[1], reverse=True))
-        indexed_structure["statistics"]["total_python_symbols"] = total_py_symbols
-        
-        progress.update(task, description=f"[green]✓ Indexed {file_count} files and {dir_count} directories[/green]")
-        
-        # Build graph structure for relationship traversal
-        progress.update(task, description=f"[cyan]Building code graph...[/cyan]")
-        graph_data = build_code_graph(indexed_structure["files"], repo_path)
-        indexed_structure["graph"] = graph_data
-        indexed_structure["statistics"]["graph_nodes"] = len(graph_data["nodes"])
-        indexed_structure["statistics"]["graph_edges"] = len(graph_data["edges"])
-        
-        # Build inverted index for fast symbol lookups (O(1) queries)
-        progress.update(task, description=f"[cyan]Building inverted index...[/cyan]")
-        inverted_index_data = build_inverted_index(indexed_structure["files"])
-        indexed_structure["inverted_index"] = inverted_index_data
-        indexed_structure["statistics"]["indexed_symbols"] = inverted_index_data["statistics"]["total_symbols"]
-        indexed_structure["statistics"]["indexed_definitions"] = inverted_index_data["statistics"]["total_definitions"]
-        indexed_structure["statistics"]["indexed_usages"] = inverted_index_data["statistics"]["total_usages"]
-        indexed_structure["statistics"]["indexed_variables"] = inverted_index_data["statistics"]["total_variables"]
+        stats = {
+            "total_files": file_count,
+            "total_directories": dir_count,
+            "total_size_bytes": total_size,
+            "languages": dict(sorted(languages.items(), key=lambda x: x[1], reverse=True)),
+            "by_extension": dict(sorted(extensions.items(), key=lambda x: x[1], reverse=True)),
+            "total_python_symbols": total_py_symbols
+        }
+    
+    return files_list, directories_list, stats
+
+
+def build_tree_from_files(files: List[Dict], directories: List[Dict]) -> Dict:
+    """Build tree structure from file and directory paths (no symbols needed)"""
+    tree = {}
+    
+    # Add files to tree
+    for file_info in files:
+        parts = file_info["path"].split(os.sep)
+        current = tree
+        for part in parts[:-1]:  # All but the file name
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+        # Add file info (minimal metadata)
+        file_name = parts[-1]
+        current[file_name] = {
+            "type": "file",
+            "size": file_info["size_bytes"],
+            "language": file_info["language"],
+            "extension": file_info["extension"],
+            "has_symbols": file_info.get("symbols") is not None
+        }
+    
+    # Add directories to tree
+    for dir_info in directories:
+        parts = dir_info["path"].split(os.sep)
+        current = tree
+        for part in parts:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+        current["_type"] = "directory"
+    
+    return tree
+
+
+def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None, 
+                  include_body: bool = True, include_docstrings: bool = True) -> Dict:
+    """
+    Index the codebase structure. Two-pass optimization:
+    Pass 1: Parse files and extract symbols
+    Pass 2: Build indexes, then strip symbols from files (symbols only in inverted_index)
+    
+    This eliminates duplicate data storage, cutting file size roughly in half.
+    
+    Args:
+        repo_path: Path to cloned repository
+        ignore_patterns: Additional patterns to ignore
+        include_body: Whether to include function body text (default: True, increases size)
+        include_docstrings: Whether to include docstrings (default: True)
+    """
+    # Pass 1: Parse codebase (extract symbols)
+    files_with_symbols, directories, parse_stats = parse_codebase(
+        repo_path, ignore_patterns, include_body, include_docstrings
+    )
+    
+    # Pass 2: Build indexes from files with symbols
+    console.print("[cyan]Building indexes...[/cyan]")
+    
+    graph_data = build_code_graph(files_with_symbols, repo_path)
+    inverted_index_data = build_inverted_index(files_with_symbols)
+    tree = build_tree_from_files(files_with_symbols, directories)
+    
+    # Strip symbols from files (keep only metadata) - eliminates duplication
+    # All symbol data is now in inverted_index only
+    minimal_files = [
+        {
+            "path": f["path"],
+            "name": f["name"],
+            "size_bytes": f["size_bytes"],
+            "language": f["language"],
+            "extension": f["extension"],
+            "directory": f["directory"],
+            # NO symbols here - they're all in inverted_index
+        }
+        for f in files_with_symbols
+    ]
+    
+    # Build final structure
+    indexed_structure = {
+        "files": minimal_files,  # Minimal metadata only (no symbols)
+        "directories": directories,
+        "tree": tree,
+        "graph": graph_data,
+        "inverted_index": inverted_index_data,  # All symbol data here (no duplication)
+        "statistics": {
+            **parse_stats,
+            "graph_nodes": len(graph_data["nodes"]),
+            "graph_edges": len(graph_data["edges"]),
+            "indexed_symbols": inverted_index_data["statistics"]["total_symbols"],
+            "indexed_definitions": inverted_index_data["statistics"]["total_definitions"],
+            "indexed_usages": inverted_index_data["statistics"]["total_usages"],
+            "indexed_variables": inverted_index_data["statistics"]["total_variables"]
+        }
+    }
     
     return indexed_structure
 
@@ -1188,9 +1227,10 @@ def main():
             "repository_url": repo_url,
             "repository_identifier": repo_identifier,
             "indexed_at": datetime.utcnow().isoformat() + "Z",
-            "index_version": "4.0.0-ai-enhanced",
+            "index_version": "5.0.0-optimized",
             "includes_docstrings": include_docstrings,
-            "includes_function_bodies": include_body
+            "includes_function_bodies": include_body,
+            "optimization": "symbols_only_in_inverted_index"  # No duplication - symbols only in inverted_index
         }
         
         # Display summary
