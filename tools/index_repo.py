@@ -125,15 +125,17 @@ def should_ignore_path(path: Path, ignore_patterns: List[str]) -> bool:
 
 class EnhancedPythonSymbolVisitor(ast.NodeVisitor):
     """
-    Enhanced AST visitor that tracks scoping, qualified names, and variables
-    for accurate "find all usages" capabilities.
+    Enhanced AST visitor that tracks scoping, qualified names, variables,
+    docstrings, and function bodies for AI-powered code understanding.
     """
-    def __init__(self):
+    def __init__(self, include_body: bool = True, include_docstrings: bool = True):
         self.definitions = []
         self.calls = []
         self.imports = []
         self.variables = []  # Track variable assignments and usages
         self.scope_stack = []  # Track current scope (class, function)
+        self.include_body = include_body  # Whether to include function body text
+        self.include_docstrings = include_docstrings  # Whether to include docstrings
     
     def _current_scope(self) -> List[str]:
         """Get current scope path as list"""
@@ -159,16 +161,77 @@ class EnhancedPythonSymbolVisitor(ast.NodeVisitor):
         except Exception:
             return ""
     
+    def _extract_function_signature(self, node) -> Dict:
+        """Extract function signature information"""
+        args = []
+        for arg in node.args.args:
+            arg_info = {"name": arg.arg}
+            if arg.annotation:
+                try:
+                    arg_info["type"] = ast.unparse(arg.annotation)
+                except:
+                    arg_info["type"] = None
+            args.append(arg_info)
+        
+        # Get return type
+        return_type = None
+        if node.returns:
+            try:
+                return_type = ast.unparse(node.returns)
+            except:
+                pass
+        
+        return {
+            "args": args,
+            "return_type": return_type,
+            "arg_count": len(args)
+        }
+    
+    def _extract_function_body(self, node) -> Optional[str]:
+        """Extract function body text (if enabled)"""
+        if not self.include_body:
+            return None
+        
+        try:
+            # Get just the function definition (signature + body)
+            return ast.unparse(node)
+        except Exception:
+            # Fallback: try to get body as text
+            try:
+                body_lines = []
+                for stmt in node.body:
+                    body_lines.append(ast.unparse(stmt))
+                return "\n".join(body_lines)
+            except:
+                return None
+    
     def visit_ClassDef(self, node: ast.ClassDef):
         self.scope_stack.append(("class", node.name))
         qualified = self._get_qualified_name(node.name)
+        
+        # Extract docstring
+        docstring = None
+        if self.include_docstrings:
+            docstring = ast.get_docstring(node)
+        
+        # Extract base classes
+        bases = []
+        for base in node.bases:
+            try:
+                bases.append(ast.unparse(base))
+            except:
+                bases.append(str(base))
+        
         self.definitions.append({
             "name": node.name,
             "qualified_name": qualified,
             "type": "class",
             "line": node.lineno,
             "scope": self._current_scope(),
-            "col_offset": getattr(node, 'col_offset', None)
+            "col_offset": getattr(node, 'col_offset', None),
+            "docstring": docstring,
+            "bases": bases,
+            "base_count": len(bases)
         })
         self.generic_visit(node)
         self.scope_stack.pop()
@@ -178,6 +241,17 @@ class EnhancedPythonSymbolVisitor(ast.NodeVisitor):
         qualified = self._get_qualified_name(node.name)
         is_method = any(s[0] == "class" for s in self.scope_stack)
         
+        # Extract docstring
+        docstring = None
+        if self.include_docstrings:
+            docstring = ast.get_docstring(node)
+        
+        # Extract signature information
+        signature = self._extract_function_signature(node)
+        
+        # Extract function body
+        body_text = self._extract_function_body(node)
+        
         self.definitions.append({
             "name": node.name,
             "qualified_name": qualified,
@@ -185,7 +259,11 @@ class EnhancedPythonSymbolVisitor(ast.NodeVisitor):
             "line": node.lineno,
             "scope": self._current_scope(),
             "is_method": is_method,
-            "col_offset": getattr(node, 'col_offset', None)
+            "col_offset": getattr(node, 'col_offset', None),
+            "docstring": docstring,
+            "signature": signature,
+            "body_text": body_text,
+            "body_line_count": len(node.body) if node.body else 0
         })
         self.generic_visit(node)
         self.scope_stack.pop()
@@ -196,6 +274,17 @@ class EnhancedPythonSymbolVisitor(ast.NodeVisitor):
         qualified = self._get_qualified_name(node.name)
         is_method = any(s[0] == "class" for s in self.scope_stack)
         
+        # Extract docstring
+        docstring = None
+        if self.include_docstrings:
+            docstring = ast.get_docstring(node)
+        
+        # Extract signature information
+        signature = self._extract_function_signature(node)
+        
+        # Extract function body
+        body_text = self._extract_function_body(node)
+        
         self.definitions.append({
             "name": node.name,
             "qualified_name": qualified,
@@ -204,7 +293,11 @@ class EnhancedPythonSymbolVisitor(ast.NodeVisitor):
             "scope": self._current_scope(),
             "is_method": is_method,
             "is_async": True,
-            "col_offset": getattr(node, 'col_offset', None)
+            "col_offset": getattr(node, 'col_offset', None),
+            "docstring": docstring,
+            "signature": signature,
+            "body_text": body_text,
+            "body_line_count": len(node.body) if node.body else 0
         })
         self.generic_visit(node)
         self.scope_stack.pop()
@@ -297,24 +390,32 @@ class EnhancedPythonSymbolVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def parse_python_file(file_path: Path) -> Optional[Dict]:
+def parse_python_file(file_path: Path, include_body: bool = True, include_docstrings: bool = True) -> Optional[Dict]:
     """
     Reads and parses a Python file, extracting symbols using enhanced AST visitor.
     Returns definitions, calls, imports, and variables with scoping information.
+    
+    Args:
+        file_path: Path to Python file
+        include_body: Whether to include function body text (increases size)
+        include_docstrings: Whether to include docstrings
+    
+    Returns:
+        Dictionary with definitions (with docstrings/bodies), calls, imports, variables
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
         tree = ast.parse(content, filename=str(file_path))
-        visitor = EnhancedPythonSymbolVisitor()
+        visitor = EnhancedPythonSymbolVisitor(include_body=include_body, include_docstrings=include_docstrings)
         visitor.visit(tree)
         
         return {
             "definitions": visitor.definitions,
             "calls": visitor.calls,
             "imports": visitor.imports,
-            "variables": visitor.variables  # NEW: Include variable tracking
+            "variables": visitor.variables
         }
     except SyntaxError as e:
         console.print(f"[yellow]Warning: Skipping {file_path} due to SyntaxError: {e}[/yellow]")
@@ -361,6 +462,11 @@ def build_inverted_index(files: List[Dict]) -> Dict:
     """
     Build inverted index for O(1) symbol lookups.
     Structure optimized for "find all usages" queries without storing full codebase.
+    
+    CRITICAL: This function preserves ALL rich context data (docstrings, bodies, 
+    signatures, etc.) from the AST visitor. It copies the entire definition object
+    rather than manually building a limited dictionary, ensuring the inverted index
+    contains the same rich information as the original files list.
     """
     symbol_index = {}
     import_map = {}
@@ -416,16 +522,12 @@ def build_inverted_index(files: List[Dict]) -> Dict:
                     "qualified_names": set()
                 }
             
-            symbol_index[name]["definitions"].append({
-                "file": file_path,
-                "line": defn["line"],
-                "col_offset": defn.get("col_offset"),
-                "qualified_name": qualified,
-                "type": defn["type"],
-                "scope": defn.get("scope", []),
-                "is_method": defn.get("is_method", False),
-                "is_async": defn.get("is_async", False)
-            })
+            # Pass through the rich definition data (docstrings, bodies, signatures, etc.)
+            # Copy the entire defn object and add file path
+            rich_defn_entry = defn.copy()
+            rich_defn_entry["file"] = file_path
+            
+            symbol_index[name]["definitions"].append(rich_defn_entry)
             symbol_index[name]["qualified_names"].add(qualified)
         
         # Index variables
@@ -437,20 +539,14 @@ def build_inverted_index(files: List[Dict]) -> Dict:
                     "usages": []
                 }
             
+            # Pass through the full variable info
+            var_entry = var.copy()
+            var_entry["file"] = file_path
+            
             if var["type"] == "assignment":
-                variable_index[var_name]["assignments"].append({
-                    "file": file_path,
-                    "line": var["line"],
-                    "col_offset": var.get("col_offset"),
-                    "scope": var.get("scope", [])
-                })
+                variable_index[var_name]["assignments"].append(var_entry)
             else:  # usage
-                variable_index[var_name]["usages"].append({
-                    "file": file_path,
-                    "line": var["line"],
-                    "col_offset": var.get("col_offset"),
-                    "scope": var.get("scope", [])
-                })
+                variable_index[var_name]["usages"].append(var_entry)
     
     # Second pass: Index calls (usages) and resolve them
     for file_info in files:
@@ -478,15 +574,11 @@ def build_inverted_index(files: List[Dict]) -> Dict:
             # Add usage to all potential targets
             for target_name in [call_name, qualified_call, base_name]:
                 if target_name in symbol_index:
-                    usage_entry = {
-                        "file": file_path,
-                        "line": call["line"],
-                        "col_offset": call.get("col_offset"),
-                        "call_site": call_name,
-                        "qualified_call": qualified_call,
-                        "scope": call.get("scope", []),
-                        "resolved": resolved is not None
-                    }
+                    # Pass through the full call info
+                    usage_entry = call.copy()
+                    usage_entry["file"] = file_path
+                    usage_entry["resolved"] = resolved is not None
+                    
                     if resolved:
                         usage_entry["resolved_to"] = resolved["qualified_name"]
                         usage_entry["target_file"] = resolved["file"]
@@ -658,9 +750,16 @@ def build_code_graph(files: List[Dict], repo_path: Path) -> Dict:
     }
 
 
-def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None) -> Dict:
+def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None, 
+                  include_body: bool = True, include_docstrings: bool = True) -> Dict:
     """
     Index the codebase structure. Performs deep parsing for Python files.
+    
+    Args:
+        repo_path: Path to cloned repository
+        ignore_patterns: Additional patterns to ignore
+        include_body: Whether to include function body text (default: True, increases size)
+        include_docstrings: Whether to include docstrings (default: True)
     """
     if ignore_patterns is None:
         ignore_patterns = []
@@ -748,10 +847,10 @@ def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None)
                         "symbols": None # Placeholder for code symbols
                     }
                     
-                    # --- NEW: Code-Aware Parsing ---
+                    # --- Code-Aware Parsing with Docstrings and Bodies ---
                     if language == 'python':
                         progress.update(task, description=f"[blue]Parsing... {file_name}[/blue]")
-                        symbols = parse_python_file(file_path)
+                        symbols = parse_python_file(file_path, include_body=include_body, include_docstrings=include_docstrings)
                         if symbols:
                             file_info["symbols"] = symbols
                             # Count all symbols including variables
@@ -761,7 +860,7 @@ def index_codebase(repo_path: Path, ignore_patterns: Optional[List[str]] = None)
                                 len(symbols["imports"]) +
                                 len(symbols.get("variables", []))
                             )
-                    # --- End New ---
+                    # --- End Code Parsing ---
 
                     indexed_structure["files"].append(file_info)
                     
@@ -1069,8 +1168,19 @@ def main():
         clone_path = clone_repository(repo_url, temp_dir, access_token)
         console.print()
         
+        # Check if user wants to skip body/docstrings (for smaller index files)
+        include_body = os.getenv('INCLUDE_FUNCTION_BODY', 'true').lower() == 'true'
+        include_docstrings = os.getenv('INCLUDE_DOCSTRINGS', 'true').lower() == 'true'
+        
+        if '--no-body' in sys.argv:
+            include_body = False
+            console.print("[yellow]Note: Function bodies will NOT be included (smaller index file)[/yellow]")
+        if '--no-docstrings' in sys.argv:
+            include_docstrings = False
+            console.print("[yellow]Note: Docstrings will NOT be included[/yellow]")
+        
         # Index the codebase
-        indexed_data = index_codebase(clone_path)
+        indexed_data = index_codebase(clone_path, include_body=include_body, include_docstrings=include_docstrings)
         console.print()
         
         # Add metadata
@@ -1078,7 +1188,9 @@ def main():
             "repository_url": repo_url,
             "repository_identifier": repo_identifier,
             "indexed_at": datetime.utcnow().isoformat() + "Z",
-            "index_version": "3.0.0-inverted-index",
+            "index_version": "4.0.0-ai-enhanced",
+            "includes_docstrings": include_docstrings,
+            "includes_function_bodies": include_body
         }
         
         # Display summary
